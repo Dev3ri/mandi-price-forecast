@@ -33,6 +33,14 @@ export default function Sidebar({ footer }) {
               </span>
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/schemes" className={navItemClass}>
+              <span className="nav-label">
+                MandiYojana
+                <span className="nav-sub">Govt schemes</span>
+              </span>
+            </NavLink>
+          </li>
           <li className="nav-item" onClick={() => { window.location.href = '/docs'; }}>
             API docs
           </li>
