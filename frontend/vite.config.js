@@ -1,9 +1,19 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(rootDir, 'src'),
+    },
+  },
   build: {
     // README says "npm run build outputs to static/dashboard/", but that
     // wasn't actually configured anywhere -- the default outDir is

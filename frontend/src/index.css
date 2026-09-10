@@ -1,3 +1,58 @@
-/* Global styling now lives in ./styles/dashboard.css (ported from the
-   original static/dashboard/style.css design system). This file is kept
-   only because main.jsx imports it. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 140 33% 98%;
+    --foreground: 150 35% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 150 35% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 35% 12%;
+    --primary: 142 72% 29%;
+    --primary-foreground: 140 60% 98%;
+    --secondary: 141 79% 93%;
+    --secondary-foreground: 145 63% 20%;
+    --muted: 140 20% 95%;
+    --muted-foreground: 150 10% 40%;
+    --accent: 38 92% 50%;
+    --accent-foreground: 30 60% 15%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 145 20% 88%;
+    --input: 145 20% 88%;
+    --ring: 142 72% 29%;
+    --radius: 0.85rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+  }
+
+  /* Prices and deltas line up column-wise wherever they appear. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Horizontal filter rails: swipeable on touch, no visible scrollbar. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip-rail {
+    @apply no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1;
+  }
+}
