@@ -1,240 +1,175 @@
-import { useEffect, useState } from 'react';
-import Sidebar from '../components/Sidebar';
-import StatusBanner from '../components/StatusBanner';
-import PageHeader from '../components/PageHeader';
-import Hero from '../components/Hero';
-import PriceChart from '../components/PriceChart';
-import MoversPanel from '../components/MoversPanel';
-import AlertsPanel from '../components/AlertsPanel';
-import PriceTable from '../components/PriceTable';
-import { getMeta, getPredict, getHistory, getTrends } from '../api';
-import '../styles/dashboard.css';
+import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
-const FALLBACK_RELIABLE_CROPS = ['Potato', 'Onion', 'Tomato'];
+import { AiInsightCard } from '@/components/ai/AiInsightCard'
+import { useAlertDialog } from '@/components/alerts/AlertProvider'
+import { CardSkeleton, EmptyState, ErrorState, TableSkeleton } from '@/components/common/States'
+import { ChipRail } from '@/components/filters/ChipRail'
+import { MandiCombobox } from '@/components/filters/MandiCombobox'
+import { MandiPriceCard } from '@/components/prices/MandiPriceCard'
+import { PriceHeroCard } from '@/components/prices/PriceHeroCard'
+import { PriceTable } from '@/components/prices/PriceTable'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useHistory, useMandiDirectory, useMeta, usePredict, useTrends } from '@/hooks/useMandiData'
+import { freshnessLabel } from '@/lib/format'
 
 export default function DashboardPage() {
-  // ---- meta (crops/mandis lists) ----
-  const [meta, setMeta] = useState(null); // { crops, mandis, reliableCrops }
-  const [crop, setCrop] = useState(null);
-  const [mandi, setMandi] = useState(null);
+  const openAlertDialog = useAlertDialog()
+  const { data: meta } = useMeta()
+  const { data: directory } = useMandiDirectory()
 
-  // ---- global status banner ----
-  const [status, setStatusState] = useState({ message: '', isError: false });
-  function setStatus(message, isError) {
-    setStatusState({ message: message || '', isError: !!isError });
-  }
+  const [crop, setCrop] = useState('Potato')
+  const [district, setDistrict] = useState(null)
+  const [mandi, setMandi] = useState(null)
 
-  // ---- selected crop/mandi: hero + chart ----
-  const [selectionLoading, setSelectionLoading] = useState(false);
-  const [predict, setPredict] = useState(null);
-  const [history, setHistory] = useState(null);
-  const [chartError, setChartError] = useState('');
+  const { data: trends, isLoading: trendsLoading, error: trendsError, refetch } = useTrends(crop)
 
-  // ---- market-wide trends: gainers/losers/alerts ----
-  const [allTrendRows, setAllTrendRows] = useState([]);
-  const [trendsError, setTrendsError] = useState('');
+  const districtOf = useMemo(
+    () => (name) => directory?.byMandi.get(name) ?? null,
+    [directory],
+  )
 
-  // ---- selected crop across mandis: table ----
-  const [tableRows, setTableRows] = useState([]);
-  const [tableError, setTableError] = useState('');
+  const rows = useMemo(() => {
+    const all = trends?.crops?.[crop] ?? []
+    if (!district) return all
+    return all.filter((row) => districtOf(row.mandi) === district)
+  }, [trends, crop, district, districtOf])
 
-  // ---- init: load meta, pick default crop/mandi ----
-  useEffect(() => {
-    (async () => {
-      try {
-        const m = await getMeta();
-        const reliableCrops = m.reliable_crops || FALLBACK_RELIABLE_CROPS;
-        setMeta({ crops: m.crops, mandis: m.mandis, reliableCrops });
+  // Highest price in the current filter is the mandi worth leading with; an
+  // explicit pick wins, but only while it still exists under the current
+  // crop/district filter.
+  const featuredMandi = useMemo(() => {
+    if (mandi && rows.some((row) => row.mandi === mandi)) return mandi
+    return [...rows].sort((a, b) => b.latest_price - a.latest_price)[0]?.mandi ?? null
+  }, [mandi, rows])
 
-        const defaultCrop = reliableCrops[0] || m.crops[0];
-        const defaultMandi = m.mandis.includes('Rayya') ? 'Rayya' : m.mandis[0];
-        setCrop(defaultCrop);
-        setMandi(defaultMandi);
-      } catch (err) {
-        setStatus('Could not load crop/mandi list from the API: ' + err.message, true);
-      }
-    })();
-  }, []);
+  const { data: predict, isLoading: predictLoading, error: predictError } = usePredict(crop, featuredMandi)
+  const { data: history } = useHistory(crop, featuredMandi, 45)
 
-  // ---- load predict + history whenever crop/mandi changes ----
-  useEffect(() => {
-    if (!crop || !mandi) return;
-    let cancelled = false;
-    (async () => {
-      setSelectionLoading(true);
-      setChartError('');
-      setStatus(`Loading ${crop} at ${mandi}…`, false);
-      try {
-        const [p, h] = await Promise.all([getPredict(crop, mandi), getHistory(crop, mandi, 45)]);
-        if (cancelled) return;
-        setPredict(p);
-        setHistory(h);
-        setStatus(p.data_note || '', false);
-        if (p.anomaly_flag?.latest_price_is_anomaly) {
-          setStatus(
-            `Heads up: the latest recorded price at ${p.mandi} was an unusually large day-over-day move — worth a second look before acting on it.`,
-            false
-          );
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setPredict(null);
-        setHistory(null);
-        setChartError(err.message);
-        setStatus(
-          err.status === 422 ? err.message : `No data for ${crop} at ${mandi}: ${err.message}`,
-          true
-        );
-      } finally {
-        if (!cancelled) setSelectionLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [crop, mandi]);
+  const cropOptions = useMemo(() => {
+    const reliable = meta?.reliable_crops ?? ['Potato', 'Onion', 'Tomato']
+    const forecastable = Object.keys(trends?.crops ?? {})
+    const names = [...new Set([...reliable, ...forecastable])]
+    return names.map((name) => ({ value: name, label: name }))
+  }, [meta, trends])
 
-  // ---- load market-wide trends once meta is ready (independent of selection) ----
-  useEffect(() => {
-    if (!meta) return;
-    (async () => {
-      try {
-        const trends = await getTrends();
-        const rows = [];
-        for (const [c, mandiRows] of Object.entries(trends.crops)) {
-          for (const r of mandiRows) rows.push({ crop: c, ...r });
-        }
-        setAllTrendRows(rows);
-        setTrendsError('');
-      } catch (err) {
-        setAllTrendRows([]);
-        setTrendsError(err.message);
-      }
-    })();
-  }, [meta]);
+  const districtOptions = useMemo(() => {
+    const inCrop = new Set(
+      (trends?.crops?.[crop] ?? []).map((row) => districtOf(row.mandi)).filter(Boolean),
+    )
+    return [...inCrop].sort().map((name) => ({ value: name, label: name }))
+  }, [trends, crop, districtOf])
 
-  // ---- load crop-across-mandis table whenever crop changes ----
-  useEffect(() => {
-    if (!crop) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const trends = await getTrends(crop);
-        const rows = trends.crops[crop] || [];
-        if (cancelled) return;
-        if (!rows.length) {
-          setTableRows([]);
-          setTableError('No mandis with enough history for this crop.');
-        } else {
-          setTableRows(rows);
-          setTableError('');
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setTableRows([]);
-        setTableError(err.message);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [crop]);
-
-  const gainers = [...allTrendRows].sort((a, b) => b.pct_change - a.pct_change).slice(0, 5);
-  const losers = [...allTrendRows].sort((a, b) => a.pct_change - b.pct_change).slice(0, 5);
+  const summary = trends?.summary
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        footer={
-          <>
-            Live data from this app&apos;s own <code>/predict</code>, <code>/history</code>{' '}
-            and <code>/trends</code> endpoints. Reliable forecasts currently cover{' '}
-            <strong>{(meta?.reliableCrops || FALLBACK_RELIABLE_CROPS).join(', ')}</strong> — other
-            crops may return &quot;not enough history.&quot;
-          </>
-        }
-      />
+    <div className="space-y-5">
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-brand-900">Mandi rates</h1>
+            <p className="text-sm text-muted-foreground">
+              Punjab mandis · ₹ per quintal
+              {predict?.latest_date ? ` · updated ${freshnessLabel(predict.latest_date)}` : ''}
+            </p>
+          </div>
+          {summary ? (
+            <div className="flex items-center gap-2 text-xs">
+              <Badge variant="up">
+                <ArrowUpRight className="size-3.5" />
+                {summary.rising} rising
+              </Badge>
+              <Badge variant="down">
+                <ArrowDownRight className="size-3.5" />
+                {summary.falling} falling
+              </Badge>
+              <Badge variant="flat">
+                <Minus className="size-3.5" />
+                {summary.stable} stable
+              </Badge>
+            </div>
+          ) : null}
+        </div>
 
-      <main className="main">
-        <PageHeader
-          crops={meta?.crops || []}
-          mandis={meta?.mandis || []}
-          reliableCrops={meta?.reliableCrops || []}
-          crop={crop}
-          mandi={mandi}
-          onCropChange={setCrop}
-          onMandiChange={setMandi}
-          disabled={selectionLoading}
+        <ChipRail
+          label="Crop"
+          options={cropOptions}
+          value={crop}
+          onChange={(value) => value && setCrop(value)}
         />
+        <ChipRail
+          label="District"
+          allLabel="All districts"
+          options={districtOptions}
+          value={district}
+          onChange={setDistrict}
+        />
+        <div className="max-w-sm space-y-1">
+          <p className="px-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Mandi</p>
+          <MandiCombobox
+            mandis={rows.map((row) => row.mandi)}
+            value={mandi && rows.some((row) => row.mandi === mandi) ? mandi : ''}
+            onChange={setMandi}
+            districtOf={districtOf}
+            placeholder="All mandis"
+          />
+        </div>
+      </section>
 
-        <StatusBanner message={status.message} isError={status.isError} />
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          {featuredMandi ? (
+            <PriceHeroCard
+              crop={crop}
+              mandi={featuredMandi}
+              predict={predict}
+              history={history}
+              isLoading={predictLoading}
+              error={predictError}
+              onSetAlert={() => openAlertDialog({ crop, mandi: featuredMandi })}
+            />
+          ) : trendsLoading ? (
+            <CardSkeleton />
+          ) : null}
 
-        {predict && <Hero predict={predict} />}
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <div className="panel-title">Price trend &amp; forecast</div>
-              <div className="panel-sub">Recent actual price, joined to the 7-day forecast</div>
-            </div>
-            <div className="legend-row">
-              <span className="legend-dot">
-                <span className="legend-swatch" style={{ background: '#173A27' }}></span>Actual
-              </span>
-              <span className="legend-dot">
-                <span className="legend-swatch" style={{ background: '#C89635' }}></span>Forecast
-              </span>
-            </div>
-          </div>
-          {predict && history ? (
-            <PriceChart history={history} predict={predict} />
-          ) : (
-            <div className="empty-state">{chartError}</div>
-          )}
+          {featuredMandi ? <AiInsightCard crop={crop} mandi={featuredMandi} /> : null}
         </div>
 
-        <div className="two-col">
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <div className="panel-title">Top gainers</div>
-                <div className="panel-sub">Largest projected 7-day increases</div>
-              </div>
-            </div>
-            <MoversPanel rows={trendsError ? [] : gainers} emptyMessage={trendsError || 'No movers to show yet.'} />
-          </div>
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <div className="panel-title">Top losers</div>
-                <div className="panel-sub">Largest projected 7-day declines</div>
-              </div>
-            </div>
-            <MoversPanel rows={trendsError ? [] : losers} emptyMessage={trendsError || 'No movers to show yet.'} />
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <div className="panel-title">Alerts</div>
-              <div className="panel-sub">Biggest projected moves across tracked markets</div>
-            </div>
-          </div>
-          {trendsError ? (
-            <div className="empty-state">{trendsError}</div>
-          ) : (
-            <AlertsPanel rows={allTrendRows} />
-          )}
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <div className="panel-title">{crop ? `${crop} across mandis` : 'Across mandis'}</div>
-              <div className="panel-sub">Today&apos;s price and forecast direction by market</div>
-            </div>
-          </div>
-          <PriceTable rows={tableRows} emptyMessage={tableError ? `${crop}: ${tableError}` : undefined} />
-        </div>
-      </main>
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>Market movers</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {rows.length} mandi{rows.length === 1 ? '' : 's'} trading {crop}
+              {district ? ` in ${district}` : ''}, biggest forecast moves first
+            </p>
+          </CardHeader>
+          <CardContent className="p-0 sm:p-0">
+            {trendsLoading ? (
+              <TableSkeleton />
+            ) : trendsError ? (
+              <ErrorState className="m-4" error={trendsError} onRetry={refetch} />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                className="m-4"
+                title="No mandis match this filter"
+                description={`No ${crop} prices reported${district ? ` in ${district}` : ''} yet. Try another district.`}
+              />
+            ) : (
+              <>
+                <div className="hidden sm:block">
+                  <PriceTable crop={crop} rows={rows} districtOf={districtOf} className="border-0 shadow-none" />
+                </div>
+                <div className="space-y-3 p-4 sm:hidden">
+                  {rows.map((row) => (
+                    <MandiPriceCard key={row.mandi} crop={crop} row={row} district={districtOf(row.mandi)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
-  );
+  )
 }
