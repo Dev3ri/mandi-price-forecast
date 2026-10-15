@@ -7,6 +7,7 @@ import PriceChart from '../components/PriceChart';
 import MoversPanel from '../components/MoversPanel';
 import AlertsPanel from '../components/AlertsPanel';
 import PriceTable from '../components/PriceTable';
+import SchemesPanel from '../components/SchemesPanel';
 import { getMeta, getPredict, getHistory, getTrends } from '../api';
 import '../styles/dashboard.css';
 
@@ -234,6 +235,8 @@ export default function DashboardPage() {
           </div>
           <PriceTable rows={tableRows} emptyMessage={tableError ? `${crop}: ${tableError}` : undefined} />
         </div>
+
+        <SchemesPanel />
       </main>
     </div>
   );

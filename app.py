@@ -69,6 +69,15 @@ async def read_index():
     return FileResponse(str(index_path))
 
 
+# Client-side routes of the React dashboard. A browser hitting one of them
+# directly (deep link, refresh, shared URL) asks the server for that path,
+# so each one has to return the same index.html and let the router take over.
+@app.api_route("/nearby", methods=["GET", "HEAD"])
+@app.api_route("/schemes", methods=["GET", "HEAD"])
+async def read_spa_route():
+    return await read_index()
+
+
 # The built dashboard's index.html references its JS/CSS bundle and icons
 # with root-relative paths (e.g. /assets/index-XXXX.js, /favicon.svg), since
 # that's what Vite emits by default. Serving index.html at "/" above without
